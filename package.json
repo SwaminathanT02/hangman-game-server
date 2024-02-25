@@ -5,6 +5,7 @@
   "main": "index.js",
   "author": "SwaminathanT02",
   "license": "MIT",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },

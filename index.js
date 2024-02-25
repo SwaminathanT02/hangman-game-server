@@ -1,14 +1,14 @@
 // server.js
-const express = require('express');
-const http = require('http');
-const socketIO = require('socket.io');
-const cors = require('cors');
-const GET = require('./api');
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import GET from './api.js';
 
 const app = express();
 app.use(cors());
 const server = http.createServer(app);
-const io = socketIO(server, {
+const io = new Server(server, {
     cors: {
         origin: 'http://localhost:3000',
         methods: ['GET', 'POST'],
@@ -38,9 +38,6 @@ const disconnectRoutine = ({ socket, data }) => {
             delete rooms[roomId];
         }
         else {
-            for (let player in rooms[roomId].players) {
-                if (player) player.score = { correctGuesses: 0, remainingTries: 6 };
-            }
             rooms[roomId].playAgain.length = 0;
         }
         io.to(roomId).emit('user left', socket.id);
