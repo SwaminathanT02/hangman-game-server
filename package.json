@@ -5,6 +5,9 @@
   "main": "index.js",
   "author": "SwaminathanT02",
   "license": "MIT",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "axios": "^1.6.7",
     "cors": "^2.8.5",
