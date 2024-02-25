@@ -1,4 +1,4 @@
-import axios from "axios";
+const axios = require('axios');
 
 const wordApiServer = "https://random-word-api.herokuapp.com";
 const meaningApiServer = "https://api.dictionaryapi.dev/api/v2/entries/en/";
@@ -48,4 +48,4 @@ const GET = async () => {
 };
 
 
-export default GET;
+module.exports = GET;

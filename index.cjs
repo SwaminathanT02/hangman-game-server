@@ -1,14 +1,14 @@
 // server.js
-import express from 'express';
-import http from 'http';
-import { Server } from 'socket.io';
-import cors from 'cors';
-import GET from './api.js';
+const express = require('express');
+const http = require('http');
+const Server = require('socket.io');
+const cors = require('cors');
+const GET = require('./api.cjs');
 
 const app = express();
 app.use(cors());
 const server = http.createServer(app);
-const io = new Server(server, {
+const io = Server(server, {
     cors: {
         origin: 'http://localhost:3000',
         methods: ['GET', 'POST'],
