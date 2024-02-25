@@ -11,8 +11,5 @@
             "src": "/(.*)",
             "dest": "index.cjs"
         }
-    ],
-    "hooks": {
-        "prebuild": "yarn install"
-    }
+    ]
 }
