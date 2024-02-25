@@ -10,7 +10,7 @@ app.use(cors());
 const server = http.createServer(app);
 const io = Server(server, {
     cors: {
-        origin: 'http://localhost:3000',
+        origin: 'https://hangman-game-delta-ochre.vercel.app/',
         methods: ['GET', 'POST'],
     },
 });
