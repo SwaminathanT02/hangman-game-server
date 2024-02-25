@@ -15,6 +15,10 @@ const io = Server(server, {
     },
 });
 
+app.get('/', (req, res) => {
+    res.status(200).json({ data: 'Hello!' })
+})
+
 const rooms = {};
 
 const disconnectRoutine = ({ socket, data }) => {
@@ -160,3 +164,5 @@ io.on('connection', (socket) => {
 server.listen(3001, () => {
     console.log('listening on *:3001');
 });
+
+module.exports = app;
