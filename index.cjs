@@ -4,59 +4,31 @@ const http = require('http');
 const Server = require('socket.io');
 const cors = require('cors');
 const GET = require('./api.cjs');
+const Room = require('./Room.cjs');
+const Connect = require('./db.cjs');
 
 const app = express();
 app.use(cors());
 const server = http.createServer(app);
 const io = Server(server, {
     cors: {
-        origin: 'https://hangman-game-git-feature-2p-mode-swaminathant02s-projects.vercel.app/',
+        origin: process.env.SERVER_ORIGIN,
         methods: ['GET', 'POST'],
     },
 });
 
 app.get('/', (req, res) => {
-    res.status(200).json({ data: 'Hello!' })
-})
+    res.status(200).json({ data: 'Hello World!' })
+});
 
-const rooms = {};
-
-const disconnectRoutine = ({ socket, data }) => {
-    let roomId = null;
-    if (data) {
-        roomId = data.roomId;
-    }
-    else {
-        roomId = Object.keys(rooms).find((roomId) =>
-            rooms[roomId].players.find((player) => player.id === socket.id));
-    }
-    if (roomId) {
-        if (data) {
-            rooms[roomId].players = rooms[roomId].players.filter((player) => player.username !== data.username);
-        }
-        else {
-            rooms[roomId].players = rooms[roomId].players.filter((player) => player.id !== socket.id);
-        }
-        if (rooms[roomId].players.length === 0) {
-            // Remove empty rooms
-            delete rooms[roomId];
-        }
-        else {
-            rooms[roomId].playAgain.length = 0;
-        }
-        io.to(roomId).emit('user left', socket.id);
-    }
-}
-
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
     console.log(`User connected: ${socket.id}`);
+    await Connect();
 
     // Listen for user name
     socket.on('set username', async (username) => {
         // Check if the user with the same name is already in a room
-        const existingRoomId = Object.keys(rooms).find(
-            (roomId) => rooms[roomId].players.find((player) => player.username === username)
-        );
+        const existingRoomId = await Room.findOne({ 'players.username': username });
 
         // If the user is in a room, inform the client
         if (existingRoomId) {
@@ -65,103 +37,137 @@ io.on('connection', (socket) => {
         }
 
         // Check for available rooms
-        let availableRoom = null;
-        for (const roomId in rooms) {
-            if (rooms[roomId].players.length < 2) {
-                availableRoom = roomId;
-                break;
-            }
-        }
+        const availableRoom = await Room.findOne({ 'players': { $size: 1 } });
 
         // If no available room, create a new one
         if (!availableRoom) {
-            const newRoomId = new Date().toISOString();
-            rooms[newRoomId] = {
-                players: [{ id: socket.id, username, score: { correctGuesses: 0, remainingTries: 6 } }],
+            const currentDate = btoa(new Date().toISOString());
+            const newRoomId = currentDate.slice(currentDate.length - 5);
+            const newRoom = {
+                roomId: newRoomId,
+                players: [{ socketId: socket.id, username, score: { correctGuesses: 0, remainingTries: 6 } }],
                 totalLetters: 0,
                 playAgain: [],
                 fetchingWord: false
             };
+            await Room.create(newRoom);
             socket.join(newRoomId); // Join the socket to the room
-            io.to(newRoomId).emit('room joined', { roomId: newRoomId, players: rooms[newRoomId].players });
+            io.to(newRoomId).emit('room joined', { room: newRoom });
         } else {
             // Add the player to the available room
-            rooms[availableRoom].players.push({ id: socket.id, username, score: { correctGuesses: 0, remainingTries: 6 } });
-            socket.join(availableRoom); // Join the socket to the room
-            io.to(availableRoom).emit('room joined', { roomId: availableRoom, players: rooms[availableRoom].players });
+            const updatedRoom = await Room.findOneAndUpdate(
+                { roomId: availableRoom.roomId, 'players.username': { $ne: username } },
+                {
+                    $addToSet: {
+                        players: {
+                            $each: [
+                                {
+                                    socketId: socket.id,
+                                    username: username,
+                                    score: { correctGuesses: 0, remainingTries: 6 },
+                                },
+                            ],
+                        },
+                    },
+                },
+                { new: true }
+            );
+            socket.join(availableRoom.roomId); // Join the socket to the room
+            io.to(availableRoom.roomId).emit('room joined', { room: updatedRoom, initializer: updatedRoom.players[0].username });
         }
     });
 
     // Once room is full, listen for 'initialize game' to send word with meaning
-    socket.on('initialize game', async ({ roomId }) => {
-        if (!rooms[roomId].fetchingWord) {
-            rooms[roomId].fetchingWord = true;
+    socket.on('initialize game', async (data) => {
+        const room = await Room.findOne({ roomId: data.room.roomId });
+        if (room.fetchingWord === false) {
+            await Room.updateOne({ roomId: data.room.roomId }, { $set: { fetchingWord: true } });
             const wordInfo = await GET();
-            rooms[roomId].totalLetters = wordInfo.word.length;
-            io.to(roomId).emit('get word', { wordInfo, data: rooms[roomId] });
-            rooms[roomId].fetchingWord = false;
+            await Room.updateOne({ roomId: data.room.roomId }, { $set: { totalLetters: wordInfo.word.length } });
+            io.to(data.room.roomId).emit('get word', { wordInfo, room: { ...data.room, totalLetters: wordInfo.word.length } });
+            await Room.updateOne({ roomId: data.room.roomId }, { $set: { fetchingWord: false } });
         }
     });
 
     // Listen for chat messages
     socket.on('handle guess', (data) => {
-        const roomId = data.roomId;
-        if (roomId) {
-            for (let player of rooms[roomId].players) {
-                if (player.username === data.username) {
-                    if (data.correct) {
-                        player.score.correctGuesses += data.correctGuessedLetters;
-                    }
-                    else {
-                        player.score.remainingTries--;
-                    }
-                }
-            }
-            // Broadcast the message to all players in the room
-            io.to(roomId).emit('update scoreboard', rooms[roomId]);
+        io.to(data.room.roomId).emit('update scoreboard', { room: data.room });
+    });
+
+    socket.on('play again', async (data) => {
+        const room = await Room.findOne({ roomId: data.room.roomId });
+        if (room.playAgain.length === 0) {
+            const updatedRoom = await Room.findOneAndUpdate(
+                {
+                    roomId: data.room.roomId,
+                    'playAgain': { $ne: data.username },
+                },
+                {
+                    $addToSet: {
+                        playAgain: data.username,
+                    },
+                },
+                { new: true }
+            );
+            io.to(data.room.roomId).emit('play again', { info: 'wait', room: updatedRoom, initializer: updatedRoom.players[0].username });
+        }
+        else if (room.playAgain.length === 1 && room.playAgain[0] !== data.username) {
+            const updatedRoom = await Room.findOneAndUpdate(
+                { roomId: data.room.roomId },
+                {
+                    $set: {
+                        'playAgain': [],
+                        'totalLetters': 0,
+                        'fetchingWord': false,
+                        'players.$[].score': { correctGuesses: 0, remainingTries: 6 },
+                    },
+                },
+                { new: true }
+            );
+            io.to(data.room.roomId).emit('play again', { info: 'play', room: updatedRoom, initializer: updatedRoom.players[0].username });
         }
     });
 
-    socket.on('play again', ({ roomId, username }) => {
-        if (roomId) {
-            if (rooms[roomId].playAgain.length === 0) {
-                rooms[roomId].playAgain.push(username);
-            }
-            else if (rooms[roomId].playAgain.length === 1 && rooms[roomId].playAgain[0] !== username) {
-                rooms[roomId].playAgain.length = 0;
-                rooms[roomId].totalLetters = 0;
-                for (let player of rooms[roomId].players) {
-                    player.score = { correctGuesses: 0, remainingTries: 6 };
-                }
-                io.to(roomId).emit('play again', { info: 'play', roomId, data: rooms[roomId] });
-            }
-        }
-    });
-
-    socket.on('leave room', (roomId, scoreboard, username) => {
-        if (scoreboard) {
-            rooms[roomId] = {
-                players: scoreboard,
-                totalLetters: 0,
-                playAgain: []
-            };
-            for (let player of rooms[roomId].players) {
-                player.score = { correctGuesses: 0, remainingTries: 6 };
-            }
-            disconnectRoutine({ socket: null, data: { username, roomId } });
-        }
-        else {
-            disconnectRoutine({ socket, data: null });
-        }
+    socket.on('leave room', async (data) => {
+        console.log(`User Left: ${socket.id}`);
+        disconnectRoutine({ data, socket, disconnected: false });
     });
 
     socket.on('disconnect', () => {
-        console.log('user disconnected');
-        // Remove the disconnected user from the room
-        disconnectRoutine({ socket, data: null });
-    });
+        console.log(`User disconnected: ${socket.id}`);
+        disconnectRoutine({ data: null, socket, disconnected: true });
+    })
+
+    async function disconnectRoutine(data) {
+        let searchCondition = (data.disconnected) ? { 'players.socketId': data.socket.id } : { roomId: data.data.room.roomId };
+        let pullCondition = (data.disconnected) ? { 'players': { socketId: data.socket.id } } : { 'players': { username: data.data.username } };
+        const updatedRoom = await Room.findOneAndUpdate(
+            searchCondition,
+            {
+                $set: {
+                    'playAgain': [],
+                    'totalLetters': 0,
+                    'fetchingWord': false
+                },
+                $pull: pullCondition
+            },
+            { new: true }
+        );
+
+        if (updatedRoom && updatedRoom.roomId) {
+            if (updatedRoom.players.length === 0) {
+                // Remove empty rooms
+                await Room.deleteOne({ roomId: updatedRoom.roomId });
+            }
+            else {
+                io.to(updatedRoom.roomId).emit('user left', 'user left');
+            }
+        }
+
+    }
 });
-server.listen(3001, () => {
+server.listen(3001, async () => {
+    await Connect();
     console.log('listening on *:3001');
 });
 

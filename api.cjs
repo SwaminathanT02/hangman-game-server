@@ -1,7 +1,8 @@
+require('dotenv').config();
 const axios = require('axios');
 
-const wordApiServer = "https://random-word-api.herokuapp.com";
-const meaningApiServer = "https://api.dictionaryapi.dev/api/v2/entries/en/";
+const wordApiServer = process.env.WORD_API_SERVER;
+const meaningApiServer = process.env.MEANING_API_SERVER;
 
 const fetchWord = async () => {
     try {
