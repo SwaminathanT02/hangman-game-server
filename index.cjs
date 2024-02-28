@@ -6,9 +6,12 @@ const cors = require('cors');
 const GET = require('./api.cjs');
 const Room = require('./Room.cjs');
 const Connect = require('./db.cjs');
+const bodyParser = require('body-parser');
+const User = require('./User.cjs');
 
 const app = express();
 app.use(cors());
+app.use(bodyParser.json());
 const server = http.createServer(app);
 const io = Server(server, {
     cors: {
@@ -19,6 +22,55 @@ const io = Server(server, {
 
 app.get('/', (req, res) => {
     res.status(200).json({ data: 'Hello World!' })
+});
+
+app.get('/api/getWord', async (req, res) => {
+    const wordInfo = await GET();
+    res.status(200).json({ wordInfo });
+});
+
+app.get('/api/get-score', async (req, res) => {
+    const userEmail = req.query.Email;
+    await Connect();
+    const existingUser = await User.findOne({ Email: userEmail });
+    if (existingUser) {
+        res.status(200).json({ Score: existingUser.Score ?? 0 });
+    }
+    else {
+        res.status(404).json({ Error: 'User not found' });
+    }
+});
+
+app.post('/api/score', async (req, res) => {
+    const { Email, Score } = await req.body;
+    await Connect();
+    const existingUser = await User.findOne({ Email });
+    if (existingUser) {
+        existingUser.Score = Score;
+        try {
+            await existingUser.save();
+            return res.status(200).json({ message: "User Score Updated!" });
+        } catch (err) {
+            return res.status(500).json({ message: err });
+        }
+    }
+});
+
+app.get('/api/get-leaderboard', async (req, res) => {
+    await Connect();
+    try {
+        const topScorers = await User.find().sort({ Score: -1 }).limit(10);
+
+        const leaderboardData = topScorers.map((user, index) => ({
+            rank: index + 1,
+            player: user.Fullname,
+            score: user.Score,
+        }));
+
+        res.status(200).json(leaderboardData);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
 });
 
 io.on('connection', async (socket) => {
